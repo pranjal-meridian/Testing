@@ -49,7 +49,7 @@ def compare_faces(img, reference_embedding, threshold=0.6):
     return "Not in Db", None
 
 # Initialize task list
-tasks = ["Look Up", "Look Left", "Look Right"]
+tasks = ["Look Front", "Look Left", "Look Right"]
 
 # Initialize camera
 cap = cv2.VideoCapture(0)
@@ -76,14 +76,14 @@ def detect_head_position(image, face_landmarks, img_w, img_h):
     return x, y, z
 
 # Main loop for task detection, face matching, and liveness check
-for _ in range(2):  # Run for 2 tasks
+for _ in range(3):  # Run for 3 tasks
     task = random.choice(tasks)
     print(f"Task: {task}")
     start_time = time.time()
 
     last_frame = None  # Variable to store the last frame
 
-    while time.time() - start_time < 3:  # 3-second timer for the task
+    while time.time() - start_time < 5:  # 3-second timer for the task
         success, image = cap.read()
         if not success:
             continue
@@ -92,7 +92,7 @@ for _ in range(2):  # Run for 2 tasks
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         img_h, img_w, _ = image.shape
 
-        remaining_time = 3 - int(time.time() - start_time)
+        remaining_time = 5 - int(time.time() - start_time)
 
         # Perform task detection (head pose) only once after the task time ends
         text = "Forward"  # Default is forward direction
@@ -105,8 +105,10 @@ for _ in range(2):  # Run for 2 tasks
                     text = "Look Right"
                 elif x < -10:
                     text = "Look Down"
-                elif x > 15:
+                elif x > 20:
                     text = "Look Up"
+                else:
+                    text = "Look Front"
 
         # Save the last frame for checking after time ends
         last_frame = image
@@ -114,6 +116,7 @@ for _ in range(2):  # Run for 2 tasks
         # Display task, remaining time, liveness, and face match status on the frame
         cv2.putText(image, f"Task: {task}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         cv2.putText(image, f"Time Left: {remaining_time}s", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+        cv2.putText(image, f"Head Position: {text}", (20, 250), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
         cv2.imshow('Face Recognition & Task Detection', image)
 
