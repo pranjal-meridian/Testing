@@ -12,7 +12,6 @@ app.prepare(ctx_id=0, det_size=(640, 640))
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
-
 # Function to detect head pose
 def detect_head_position(image, face_landmarks, img_w, img_h):
     face_3d, face_2d = [], []
@@ -34,10 +33,9 @@ def detect_head_position(image, face_landmarks, img_w, img_h):
 
     return x, y, z
 
-
-# Capture images for Left, Right, and Front poses
+# Capture images for Left, Right, Front, Up, and Down poses
 cap = cv2.VideoCapture(0)
-poses = {"Look Left": None, "Look Right": None, "Look Front": None}
+poses = {"Look Left": None, "Look Right": None, "Look Front": None, "Look Up": None, "Look Down": None}
 embeddings = []
 
 for pose in poses.keys():
