@@ -20,11 +20,13 @@ URI = "mongodb://localhost:27017/"
 client = MongoClient('mongodb://localhost:27017/')
 db = client['Liveliness']
 User = db['Users']
+collection = db['Users']
 
-face = FaceAnalysis(name="buffalo_l")
-face.prepare(ctx_id=0, det_size=(640, 640))
+face_app = FaceAnalysis(name="buffalo_l")
+face_app.prepare(ctx_id=0, det_size=(640, 640))
 
 tasks = ["Look Front", "Look Left", "Look Right", "Look Up", "Look Down"]
+
 
 # Function to decode base64 image from frontend
 def decode_image(img_base64):
@@ -37,12 +39,15 @@ def decode_image(img_base64):
         print("Error decoding image:", e)
         return None
 
+
 # Function to get stored reference embeddings from MongoDB
 def get_reference_embedding(email):
     user = collection.find_one({"email": email})
+    print(user)
     if user and "face_embedding" in user:
         return np.array(user["face_embedding"])
     return None
+
 
 # Function to compute embeddings of captured image
 def compute_embedding(img):
@@ -51,15 +56,18 @@ def compute_embedding(img):
         return faces[0].normed_embedding
     return None
 
+
 # Function to check for spoofing using DeepFace
 def check_liveness(img):
     try:
-        result = DeepFace.extract_faces(img_path=img, detector_backend="opencv", enforce_detection=False, align=False, anti_spoofing=True)
+        result = DeepFace.extract_faces(img_path=img, detector_backend="opencv", enforce_detection=False, align=False,
+                                        anti_spoofing=True)
         if result and "is_real" in result[0]:
             return "Live" if result[0]["is_real"] else "Spoof"
     except Exception as e:
         print("Liveness detection error:", e)
     return "Unknown"
+
 
 # registartion route
 @app.route("/register", methods=["POST"])
@@ -83,17 +91,18 @@ def register():
     with open(filename, "wb") as f:
         f.write(base64.b64decode(image))
 
-     # Load the image and extract embeddings
+    # Load the image and extract embeddings
     img = cv2.imread(filename)
-    faces = face.get(img)
-    
+    faces = face_app.get(img)
+
     if len(faces) == 0:
         return jsonify({"status": "error", "message": "No face detected"}), 400
 
     # Extract the first detected face embedding
     face_embedding = faces[0].embedding.tolist()
 
-    User.insert_one({"name": name, "email": email, "password": password, "image": filename,"face_embedding": face_embedding})
+    User.insert_one(
+        {"name": name, "email": email, "password": password, "image": filename, "face_embedding": face_embedding})
 
     return jsonify({"status": "success"})
 
@@ -109,9 +118,10 @@ def get_random_task():
 @app.route('/verify', methods=['POST'])
 def verify():
     try:
-        data = request.json
+        data = request.form
         email = data.get("email")
         img_base64 = data.get("image")
+        img_base64 = img_base64.split(",")[1]
 
         if not email or not img_base64:
             return jsonify({"error": "Missing email or image"}), 400
@@ -150,7 +160,7 @@ def verify():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
+
 
 if __name__ == "__main__":
     app.run(debug=True)
