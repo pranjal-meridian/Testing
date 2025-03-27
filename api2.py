@@ -28,8 +28,8 @@ face.prepare(ctx_id=0, det_size=(640, 640))
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
-tasks = ["Look Front", "Look Left", "Look Right", "Look Up", "Look Down"]
-selected_task = ""
+# tasks = ["Look Front", "Look Left", "Look Right", "Look Up", "Look Down"]
+# selected_task = ""
 
 # Function to decode base64 image from frontend
 def decode_image(img_base64):
@@ -160,11 +160,13 @@ def register():
     return jsonify({"status": "success"})
 
 
-# route for sending random task to frontend
-@app.route("/task", methods=["GET"])
-def get_random_task():
-    selected_task = random.choice(tasks)
-    return jsonify({"task": selected_task})
+''' use random function in frontend to send randomly selected task to backend at /verify route. This one has scalability issues '''
+
+# # route for sending random task to frontend
+# @app.route("/task", methods=["GET"])
+# def get_random_task():
+#     selected_task = random.choice(tasks)
+#     return jsonify({"task": selected_task})
 
 
 # actual verification route
@@ -177,6 +179,7 @@ def verify():
         # img_base64 = request.files.get("image")
 
         email = request.form.get("email")
+        selected_task = request.form.get("task")
         img_base64 = request.form.get("image")
         img_base64 = img_base64.split(",")[1]
 
