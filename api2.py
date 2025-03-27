@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify
 from pymongo import MongoClient
 from deepface import DeepFace
 from insightface.app import FaceAnalysis
+import mediapipe as mp
 import cv2
 import random
 
@@ -20,13 +21,15 @@ URI = "mongodb://localhost:27017/"
 client = MongoClient('mongodb://localhost:27017/')
 db = client['Liveliness']
 User = db['Users']
-collection = db['Users']
 
-face_app = FaceAnalysis(name="buffalo_l")
-face_app.prepare(ctx_id=0, det_size=(640, 640))
+face = FaceAnalysis(name="buffalo_l")
+face.prepare(ctx_id=0, det_size=(640, 640))
+
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
 tasks = ["Look Front", "Look Left", "Look Right", "Look Up", "Look Down"]
-
+selected_task = ""
 
 # Function to decode base64 image from frontend
 def decode_image(img_base64):
@@ -40,34 +43,85 @@ def decode_image(img_base64):
         return None
 
 
+# this code for postman api testing :-
+# def decode_image(image_file):
+#     try:
+#         image_file.seek(0)  # Ensure file pointer is at the beginning
+#         img_array = np.frombuffer(image_file.read(), np.uint8)  # Read bytes as NumPy array
+#         img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)  # Decode image
+#         if img is None:
+#             raise ValueError("cv2.imdecode failed to decode image")  # Explicit error message
+#         return img
+#     except Exception as e:
+#         print("Error decoding image:", str(e))  # Print error for debugging
+#         return None
+
+
 # Function to get stored reference embeddings from MongoDB
 def get_reference_embedding(email):
     user = collection.find_one({"email": email})
-    print(user)
     if user and "face_embedding" in user:
         return np.array(user["face_embedding"])
     return None
 
-
 # Function to compute embeddings of captured image
 def compute_embedding(img):
-    faces = face_app.get(img)
+    faces = face.get(img)
     if len(faces) > 0:
         return faces[0].normed_embedding
     return None
 
+# # Function to detect head position using MediaPipe
+def detect_head_position(image, face_landmarks, img_w, img_h):
+    face_3d, face_2d = [], []
+    for idx, lm in enumerate(face_landmarks.landmark):
+        if idx in [33, 263, 1, 61, 291, 199]:
+            x, y = int(lm.x * img_w), int(lm.y * img_h)
+            face_2d.append([x, y])
+            face_3d.append([x, y, lm.z])
+    
+    face_2d, face_3d = np.array(face_2d, dtype=np.float64), np.array(face_3d, dtype=np.float64)
+    focal_length = 1 * img_w
+    cam_matrix = np.array([[focal_length, 0, img_h / 2],
+                           [0, focal_length, img_w / 2], [0, 0, 1]])
+    dist_matrix = np.zeros((4, 1), dtype=np.float64)
+    success, rot_vec, trans_vec = cv2.solvePnP(face_3d, face_2d, cam_matrix, dist_matrix)
+    rmat, _ = cv2.Rodrigues(rot_vec)
+    angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
+    x, y, z = angles[0] * 360, angles[1] * 360, angles[2] * 360
+    return x, y, z
+
+
+# Function to check whether user performed correct task or not
+def validate_task(image):
+    img_h, img_w, _ = image.shape
+    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(rgb_image)
+    
+    if results.multi_face_landmarks:
+        for face_landmarks in results.multi_face_landmarks:
+            x, y, z = detect_head_position(image, face_landmarks, img_w, img_h)
+            if y < -10:
+                return "Look Left"
+            elif y > 10:
+                return "Look Right"
+            elif x < -10:
+                return "Look Down"
+            elif x > 20:
+                return "Look Up"
+            else:
+                return "Look Front"
+    return "Unknown"
 
 # Function to check for spoofing using DeepFace
 def check_liveness(img):
     try:
-        result = DeepFace.extract_faces(img_path=img, detector_backend="opencv", enforce_detection=False, align=False,
-                                        anti_spoofing=True)
+        result = DeepFace.extract_faces(img_path=img, detector_backend="opencv", enforce_detection=False, align=False, anti_spoofing=True)
         if result and "is_real" in result[0]:
             return "Live" if result[0]["is_real"] else "Spoof"
     except Exception as e:
         print("Liveness detection error:", e)
     return "Unknown"
-
 
 # registartion route
 @app.route("/register", methods=["POST"])
@@ -91,18 +145,17 @@ def register():
     with open(filename, "wb") as f:
         f.write(base64.b64decode(image))
 
-    # Load the image and extract embeddings
+     # Load the image and extract embeddings
     img = cv2.imread(filename)
-    faces = face_app.get(img)
-
+    faces = face.get(img)
+    
     if len(faces) == 0:
         return jsonify({"status": "error", "message": "No face detected"}), 400
 
     # Extract the first detected face embedding
     face_embedding = faces[0].embedding.tolist()
 
-    User.insert_one(
-        {"name": name, "email": email, "password": password, "image": filename, "face_embedding": face_embedding})
+    User.insert_one({"name": name, "email": email, "password": password, "image": filename,"face_embedding": face_embedding})
 
     return jsonify({"status": "success"})
 
@@ -117,10 +170,14 @@ def get_random_task():
 # actual verification route
 @app.route('/verify', methods=['POST'])
 def verify():
-    try:
-        data = request.form
-        email = data.get("email")
-        img_base64 = data.get("image")
+    try:  
+        '''for postman api testing:-'''
+        # selected_task = "Look Front"
+        # email = request.form.get("email")
+        # img_base64 = request.files.get("image")
+
+        email = request.json.get("email")
+        img_base64 = request.json.get("image")
         img_base64 = img_base64.split(",")[1]
 
         if not email or not img_base64:
@@ -151,16 +208,27 @@ def verify():
         # Check liveness
         liveness_status = check_liveness(img)
 
+        # Task validation
+        task_validity = ""
+        task_result = validate_task(img)
+        if task_result == selected_task:
+            task_validity = "Correct"
+        else:
+            task_validity = "Incorrect"
+
         # Response
         return jsonify({
             "face_match": face_match,
             "similarity": round(float(similarity), 2),
-            "liveness_status": liveness_status
+            "liveness_status": liveness_status,
+            "task_validity": task_validity
         })
 
     except Exception as e:
+        # import traceback
+        # print(traceback.format_exc())  # Print the full error stack trace
         return jsonify({"error": str(e)}), 500
-
+    
 
 if __name__ == "__main__":
     app.run(debug=True)
