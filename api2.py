@@ -176,8 +176,8 @@ def verify():
         # email = request.form.get("email")
         # img_base64 = request.files.get("image")
 
-        email = request.json.get("email")
-        img_base64 = request.json.get("image")
+        email = request.form.get("email")
+        img_base64 = request.form.get("image")
         img_base64 = img_base64.split(",")[1]
 
         if not email or not img_base64:
