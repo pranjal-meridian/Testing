@@ -9,7 +9,6 @@ from deepface import DeepFace
 from insightface.app import FaceAnalysis
 import mediapipe as mp
 import cv2
-import random
 
 app = Flask(__name__)
 CORS(app)
@@ -107,11 +106,16 @@ def validate_task(image):
         for face_landmarks in results.multi_face_landmarks:
             x, y, z = detect_head_position(image, face_landmarks, img_w, img_h)
             if y < -10:
-                return "Look Left"
+                head_position = "Left"
             elif y > 10:
-                return "Look Right"
+                head_position = "Right"
+            elif x < -10:
+                head_position = "Down"
+            elif x > 20:
+                head_position = "Up"
             else:
-                return "Look Front"
+                head_position = "Front"
+            return head_position
     return "Unknown"
 
 
@@ -225,6 +229,8 @@ def verify():
         selected_task = request.form.get("task")
         img_base64 = request.form.get("image")
         img_base64 = img_base64.split(",")[1]
+
+        print(email, selected_task)
 
         if not email or not img_base64:
             return jsonify({"error": "Missing email or image"}), 400
