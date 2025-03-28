@@ -201,8 +201,11 @@ def verify():
         if captured_embedding is None:
             return jsonify({"error": "No face detected in the captured image"}), 400
 
-        # Compute similarity
-        similarity = np.dot(captured_embedding, reference_embedding)
+       # Compute similarity
+        def normalize(embedding):
+            return embedding / np.linalg.norm(embedding)
+        similarity = np.dot(normalize(captured_embedding), normalize(reference_embedding))
+        print(similarity)
         threshold = 0.6  # Adjust based on performance
 
         # Check face match
