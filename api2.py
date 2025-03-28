@@ -107,7 +107,7 @@ def validate_task(image):
                 return "Look Right"
             elif x < -10:
                 return "Look Down"
-            elif x > 20:
+            elif x > 10:
                 return "Look Up"
             else:
                 return "Look Front"
@@ -209,7 +209,7 @@ def verify():
         threshold = 0.6  # Adjust based on performance
 
         # Check face match
-        face_match = "Matched" if similarity > threshold else "Not Matched"
+        face_match = "Matched" if similarity >= threshold else "Not Matched"
 
         # Check liveness
         liveness_status = check_liveness(img)
