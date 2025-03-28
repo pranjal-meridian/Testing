@@ -130,37 +130,54 @@ def check_liveness(img):
 # registartion route
 @app.route("/register", methods=["POST"])
 def register():
-    image = request.form.get("Image")
+    # Get the images (front, left, right) from the form
+    front_image = request.form.get("frontImage")
+    left_image = request.form.get("leftImage")
+    right_image = request.form.get("rightImage")
     name = request.form.get("name")
     email = request.form.get("email")
     password = request.form.get("password")
 
-    if not all([image, name, email, password]):
+    if not all([front_image, left_image, right_image, name, email, password]):
         return jsonify({"status": "error", "message": "Missing required fields"}), 400  # Bad request
 
+    # Check if the user already exists
     if User.find_one({"email": email}):
         return jsonify({"status": "error", "message": "User already exists"}), 400
 
-    image = image.split(",")[1]
-    Timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    # save the image from base64 to a file
-    os.makedirs("images", exist_ok=True)
-    filename = f'images/{Timestamp}.jpeg'
-    with open(filename, "wb") as f:
-        f.write(base64.b64decode(image))
+    # Decode and save the images
+    images = [front_image, left_image, right_image]
+    embeddings = []
 
-    # Load the image and extract embeddings
-    img = cv2.imread(filename)
-    faces = face.get(img)
+    for i, img_data in enumerate(images):
+        img_data = img_data.split(",")[1]  # Remove base64 prefix
+        Timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        os.makedirs("images", exist_ok=True)
+        filename = f'images/{Timestamp}_{i}.jpeg'
+        with open(filename, "wb") as f:
+            f.write(base64.b64decode(img_data))
 
-    if len(faces) == 0:
-        return jsonify({"status": "error", "message": "No face detected"}), 400
+        # Load the image and extract embeddings
+        img = cv2.imread(filename)
+        faces = face.get(img)
 
-    # Extract the first detected face embedding
-    face_embedding = faces[0].embedding.tolist()
+        if len(faces) == 0:
+            return jsonify({"status": "error", "message": f"No face detected in image {i + 1}"}), 400
 
-    User.insert_one(
-        {"name": name, "email": email, "password": password, "image": filename, "face_embedding": face_embedding})
+        # Extract the first detected face embedding
+        embeddings.append(faces[0].embedding)
+
+    # Compute the average embedding
+    avg_embedding = np.mean(embeddings, axis=0).tolist()
+
+    # Save user data along with the average face embedding
+    User.insert_one({
+        "name": name,
+        "email": email,
+        "password": password,
+        "images": images,  # Optionally store the image filenames
+        "face_embedding": avg_embedding
+    })
 
     return jsonify({"status": "success"})
 
