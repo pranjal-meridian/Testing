@@ -105,13 +105,11 @@ def validate_task(image):
     if results.multi_face_landmarks:
         for face_landmarks in results.multi_face_landmarks:
             x, y, z = detect_head_position(image, face_landmarks, img_w, img_h)
-            if y < -10:
+            if y < -9:
                 head_position = "Left"
-            elif y > 10:
+            elif y > 9:
                 head_position = "Right"
-            elif x < -10:
-                head_position = "Down"
-            elif x > 20:
+            elif x > 15:
                 head_position = "Up"
             else:
                 head_position = "Front"
@@ -267,6 +265,7 @@ def verify():
         # Task validation
         task_validity = ""
         task_result = validate_task(img)
+        print("Detected task", task_result)
         if task_result == selected_task:
             task_validity = "Correct"
         else:
