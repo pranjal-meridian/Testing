@@ -59,7 +59,7 @@ def decode_image(img_base64):
 
 # Function to get stored reference embeddings from MongoDB
 def get_reference_embedding(email):
-    user = collection.find_one({"email": email})
+    user = User.find_one({"email": email})
     if user and "face_embedding" in user:
         return np.array(user["face_embedding"])
     return None
