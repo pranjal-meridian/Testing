@@ -9,6 +9,7 @@ from deepface import DeepFace
 from insightface.app import FaceAnalysis
 import mediapipe as mp
 import cv2
+import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -22,6 +23,8 @@ URI = "mongodb://localhost:27017/"
 client = MongoClient('mongodb://localhost:27017/')
 db = client['Liveliness']
 User = db['Users']
+Logs = db["Logs"]
+Admins = db["Admins"]
 
 face = FaceAnalysis(name="buffalo_l")
 face.prepare(ctx_id=0, det_size=(640, 640))
@@ -122,11 +125,48 @@ def check_liveness(img):
     try:
         result = DeepFace.extract_faces(img_path=img, detector_backend="opencv", enforce_detection=False, align=False,
                                         anti_spoofing=True)
-        if result and "is_real" in result[0]:
-            return "Live" if result[0]["is_real"] else "Spoof"
+        return "Live" if result[0]["antispoof_score"] > 0.5 else "Spoof"
     except Exception as e:
         print("Liveness detection error:", e)
     return "Unknown"
+
+
+def get_location(latitude, longitude):
+    url = f"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude={latitude}&longitude={longitude}&localityLanguage=en"
+    response = requests.get(url)
+    data = response.json()
+
+    if "locality" in data:
+        return {
+            "city": data.get('city', 'Unknown'),
+            "state": data.get('principalSubdivision', 'Unknown'),
+            "country": data.get('countryName', 'Unknown')
+        }
+    return {"city": "Unknown", "state": "Unknown", "country": "Unknown"}
+
+@app.route("/log-verification", methods=["POST"])
+def log_verification():
+    data = request.json
+    email = data.get("email")
+    latitude = data.get("latitude")
+    time_taken = data.get("time_taken")
+    longitude = data.get("longitude")
+    location_data = get_location(latitude, longitude)
+
+
+    if not email:
+        return jsonify({"status": "error", "message": "Missing email"}), 400
+
+    result = Logs.find_one_and_update(
+        {"email": email},
+        {"$set": {"verification_status": True, "status": "Verified", "detail": "Logged in Successfully",
+                  "location": location_data, "timestamp": datetime.datetime.now(), "time_taken": time_taken}},
+        sort=[("timestamp", -1)]
+    )
+    if result:
+        return jsonify({"status": "success", "message": "Verified successfully in db."})
+    else:
+        return jsonify({"status": "error", "message": "Log entry not found."})
 
 
 # registartion route
@@ -139,6 +179,11 @@ def register():
     name = request.form.get("name")
     email = request.form.get("email")
     password = request.form.get("password")
+    latitude = request.form.get('latitude')
+    longitude = request.form.get('longitude')
+
+    if latitude and longitude:
+        location_data = get_location(latitude, longitude)
 
     if not all([front_image, left_image, right_image, name, email, password]):
         return jsonify({"status": "error", "message": "Missing required fields"}), 400  # Bad request
@@ -180,7 +225,8 @@ def register():
         "images": images,  # Optionally store the image filenames
         "face_embedding": avg_embedding
     })
-
+    Logs.insert_one({"email": email, "name": name, "status": "In Process", "login_status": True, "verification_status": False,
+                     "detail": "Registered", "location": location_data, "timestamp": datetime.datetime.now()})
     return jsonify({"status": "success"})
 
 
@@ -188,20 +234,38 @@ def register():
 def login():
     data = request.json
     email = data.get("email")
+    name = User.find_one({"email":email})['name']
     password = data.get("password")
-
+    latitude = data.get("latitude")
+    longitude = data.get("longitude")
+    location_data = get_location(latitude, longitude) if latitude and longitude else {}
     if not email or not password:
         return jsonify({"status": "error", "message": "Missing email or password"}), 400
 
     user = User.find_one({"email": email})
 
     if not user:
+        Logs.insert_one({"email": email, "name": name, "status": "Rejected", "login_success": False, "verification_status": False,
+                         "detail": "User not found", "location": location_data, "timestamp": datetime.datetime.now()})
         return jsonify({"status": "error", "message": "User not found"}), 404
 
     if user["password"] != password:
+        Logs.insert_one({"email": email, "name": name, "status": "Rejected", "login_success": False, "verification_status": False,
+                         "detail": "Invalid password", "location": location_data, "timestamp": datetime.datetime.now()})
         return jsonify({"status": "error", "message": "Invalid password"}), 401
 
-    return jsonify({"status": "success", "message": "Login successful"})
+    is_admin = Admins.find_one({"email": email}) is not None
+    if is_admin:
+        Logs.insert_one(
+            {"email": email, "name": name, "status": "Admin Login", "login_success": True, "verification_status": False,
+             "detail": "Admin Login", "location": location_data,
+             "timestamp": datetime.datetime.now()})
+        return jsonify(
+            {"status": "success", "message": "Admin Login successful", "is_admin": is_admin})
+
+    Logs.insert_one({"email": email, "name": name, "status": "In Process", "login_success": True, "verification_status": False,
+                     "detail": "Passed login, awaiting verification", "location": location_data, "timestamp": datetime.datetime.now()})
+    return jsonify({"status": "success", "message": "Login successful, proceed to verification", "is_admin": is_admin})
 
 
 ''' use random function in frontend to send randomly selected task to backend at /verify route. This one has scalability issues '''
@@ -283,6 +347,14 @@ def verify():
         # import traceback
         # print(traceback.format_exc())  # Print the full error stack trace
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/get-logs", methods=["GET"])
+def get_logs():
+    logs = list(Logs.find().sort("timestamp", -1))  # Fetch logs in descending order
+    for log in logs:
+        log["_id"] = str(log["_id"])  # Convert ObjectId to string (for frontend)
+    return jsonify(logs)
 
 
 if __name__ == "__main__":
