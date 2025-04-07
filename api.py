@@ -11,6 +11,7 @@ import mediapipe as mp
 import cv2
 import requests
 
+
 app = Flask(__name__)
 CORS(app)
 UPLOAD_FOLDER = '/path/to/the/uploads'
