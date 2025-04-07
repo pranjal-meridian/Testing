@@ -10,6 +10,7 @@ from insightface.app import FaceAnalysis
 import mediapipe as mp
 import cv2
 import requests
+from collections import defaultdict
 
 
 app = Flask(__name__)
@@ -36,6 +37,67 @@ face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_con
 
 # tasks = ["Look Front", "Look Left", "Look Right", "Look Up", "Look Down"]
 # selected_task = ""
+
+
+import datetime
+from collections import defaultdict
+
+def get_active_users_by_day():
+    today = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)  # Set today to midnight UTC
+    print(today)
+    
+    # Last 7 days (including today)
+    last_7_days = [(today - datetime.timedelta(days=i)).strftime('%Y-%m-%d') for i in range(6, -1, -1)]
+    
+    # Query MongoDB for active users in the last 7 days (including today)
+    query = {
+        "timestamp": {"$gte": today - datetime.timedelta(days=6), "$lt": today + datetime.timedelta(days=1)},  
+        "login_status": True  # Only count successful logins
+    }
+    
+    # Fetch logs
+    active_users = list(Logs.find(query))
+    
+    # Group users by day
+    active_counts = defaultdict(int)
+    
+    for user in active_users:
+        date_str = user["timestamp"].strftime('%Y-%m-%d')  # Extract only the date
+        active_counts[date_str] += 1
+    
+    # Prepare final result (ensure all days are included)
+    active_users_per_day = [active_counts[day] for day in last_7_days]
+
+    # Compute change percentage with previous 7-day period
+    prev_week_query = {
+        "timestamp": {
+            "$gte": today - datetime.timedelta(days=13),
+            "$lt": today - datetime.timedelta(days=6)
+        },
+        "login_status": True
+    }
+    prev_week_users = Logs.count_documents(prev_week_query)
+
+    # Total active users this week
+    total_active_users = sum(active_users_per_day)
+
+    # Calculate percentage change
+    if prev_week_users == 0:
+        percentage_change = 0
+    else:
+        percentage_change = round(((total_active_users - prev_week_users) / prev_week_users) * 100, 2)
+
+    # Change arrow (increase or decrease)
+    change_arrow = "↑" if total_active_users > prev_week_users else "↓"
+
+    return {
+        "active_users_per_day": active_users_per_day,  # Already in chronological order
+        "total_active_users": total_active_users,
+        "percentage_change": percentage_change,
+        "change_arrow": change_arrow,
+        "days": last_7_days
+    }
+
 
 # Function to decode base64 image from frontend
 def decode_image(img_base64):
@@ -278,6 +340,22 @@ def login():
 #     selected_task = random.choice(tasks)
 #     return jsonify({"task": selected_task})
 
+
+@app.route('/active-users', methods=['GET'])
+def active_users():
+    data = get_active_users_by_day()
+    return jsonify(data)
+
+
+@app.route('/auth-rates', methods=['GET'])
+def get_auth_rates():
+    success_count = Logs.count_documents({"status": "Verified"})
+    failure_count = Logs.count_documents({"status": "Rejected"})
+
+    return {
+        "success": success_count,
+        "failure": failure_count
+    }
 
 # actual verification route
 @app.route('/verify', methods=['POST'])
