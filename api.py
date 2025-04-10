@@ -436,5 +436,113 @@ def get_logs():
     return jsonify(logs)
 
 
+@app.route('/average-session-duration', methods=['GET'])
+def get_avg_session_duration():
+    try:
+        today = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        start_date = today - datetime.timedelta(days=6)  # Last 7 days including today
+
+        # Generate all dates in range
+        all_dates = {(start_date + datetime.timedelta(days=i)).strftime("%Y-%m-%d"): 0 for i in range(6)}
+
+        # Aggregate logs to check for 'In Process' status and compute average session duration
+        pipeline = [
+            {"$match": {"timestamp": {"$gte": start_date}}},
+            {"$group": {
+                "_id": {
+                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$timestamp"}},
+                    "status": "$status"
+                },
+                "all_time_taken": {"$push": "$time_taken"}
+            }},
+            {"$group": {
+                "_id": "$_id.date",
+                "statuses": {"$push": {"status": "$_id.status", "time_taken": "$all_time_taken"}}
+            }},
+            {"$sort": {"_id": 1}}
+        ]
+
+        results = list(Logs.aggregate(pipeline))
+
+        # Process results
+        for entry in results:
+            date = entry["_id"]
+            session_times = []
+            in_process_found = False
+
+            for status_entry in entry["statuses"]:
+                if status_entry["status"] == "In Process":
+                    in_process_found = True
+                session_times.extend(status_entry["time_taken"])
+
+            # If 'In Process' is found, set first time_taken to 0
+            if in_process_found and session_times:
+                session_times[0] = 0
+
+            # Compute average session duration
+            avg_session_duration = sum(session_times) / len(session_times) if session_times else 0
+            all_dates[date] = round(avg_session_duration, 2)
+
+        # Convert results to list format
+        last_7_days_data = [{"date": date, "average_session_duration": avg_duration} for date, avg_duration in all_dates.items()]
+
+        # ---------------- Calculate Overall Average Session Duration ----------------
+        all_time_pipeline = [
+            {"$group": {
+                "_id": None,
+                "all_time_taken": {"$push": "$time_taken"}
+            }}
+        ]
+        all_time_results = list(Logs.aggregate(all_time_pipeline))
+        
+        if all_time_results and all_time_results[0]["all_time_taken"]:
+            all_time_sessions = sum(all_time_results[0]["all_time_taken"])
+            all_time_count = len(all_time_results[0]["all_time_taken"])
+            overall_avg_session_duration = round(all_time_sessions / all_time_count, 2) if all_time_count > 0 else 0
+        else:
+            overall_avg_session_duration = 0
+
+        # ---------------- Calculate Percentage Increase/Decrease ----------------
+        previous_week_start = today - datetime.timedelta(days=13)  
+        previous_week_end = today - datetime.timedelta(days=6)  # Last week's range
+
+        prev_week_pipeline = [
+            {"$match": {"timestamp": {"$gte": previous_week_start, "$lte": previous_week_end}}},
+            {"$group": {
+                "_id": None,
+                "all_time_taken": {"$push": "$time_taken"}
+            }}
+        ]
+        prev_week_results = list(Logs.aggregate(prev_week_pipeline))
+
+        if prev_week_results and prev_week_results[0]["all_time_taken"]:
+            prev_week_sessions = sum(prev_week_results[0]["all_time_taken"])
+            prev_week_count = len(prev_week_results[0]["all_time_taken"])
+            prev_week_avg = round(prev_week_sessions / prev_week_count, 2) if prev_week_count > 0 else 0
+        else:
+            prev_week_avg = 0
+
+        # Calculate percentage difference
+        if prev_week_avg > 0:
+            percentage_change = round(((overall_avg_session_duration - prev_week_avg) / prev_week_avg) * 100, 2)
+        else:
+            percentage_change = 0  # Avoid division by zero
+
+        # Determine up or down arrow indicator
+        trend = "up" if percentage_change > 0 else "down" if percentage_change < 0 else "neutral"
+
+        # ---------------- Final Response ----------------
+        return jsonify({
+            "success": True,
+            "last_7_days": last_7_days_data,
+            "overall_avg_session_duration": overall_avg_session_duration,
+            "percentage_change": percentage_change,
+            "trend": trend  # up/down arrow indication
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(debug=True)
